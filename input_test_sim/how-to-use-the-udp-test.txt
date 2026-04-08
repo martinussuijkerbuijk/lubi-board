@@ -1,0 +1,16 @@
+1. Open a terminal (PowerShell or cmd) in this folder.
+2. Choose how you want to run the script inside `stochastic_udp_test.py`:
+   - `SEND_AS_SEQUENCE = True` (default) cycles through the prebuilt bead layouts, sending one every `DELAY_SECONDS` (default 10s).
+   - `SEND_AS_SEQUENCE = False` sends only the first sample payload once and exits (one-shot test).
+   Adjust `DELAY_SECONDS` if you need a longer or shorter pause between packets.
+3. Run:
+       python stochastic_udp_test.py
+4. Keep ScenSyn running while you test, and make sure you are using the right transport path:
+   - `TARGET_MODE = "direct"` sends straight to ScenSyn on UDP port `5001` (recommended for debugging the local vis_story trigger path).
+   - `TARGET_MODE = "hub"` sends to Synesyn Hub UDP ingest on port `5000`, which ScenSyn then receives through the Hub subscription path.
+   - `TARGET_MODE = "auto"` chooses `hub` when Hub health is available, otherwise `direct`.
+   By default the script sends a packet every 10 seconds (adjust `DELAY_SECONDS` if needed).
+   - **Terminal output:** the PowerShell/cmd window echoes `Sent: {...}` so you can confirm what was transmitted.
+   - **Godot console:** open the Output panel and search/filter for `ExternalInputListener` to see the incoming payload logged there.
+   - **Story Log:** each packet is injected automatically as a “Chaos Engine” system line plus the auto-generated Seeker response, so you can verify results in the UI immediately.
+5. Swap to another sample by commenting out the old payload and enabling a different one. Use Ctrl+C to stop the loop.

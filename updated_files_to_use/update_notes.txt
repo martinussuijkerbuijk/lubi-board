@@ -1,0 +1,197 @@
+================================================================================
+ STOCHASTIC DREAMS — Odu Selection Expansion
+ Updated: 2026-04-05
+================================================================================
+
+OVERVIEW
+--------
+These updated files expand the narrative variety available from the physical
+Lubi Board + Pendulum system by replacing the 4-entry STORY_PRESETS lookup
+with the full 16-Odu ontology and a sector-aware selection mechanism.
+
+Previously, the hardware bridge used only 4 narrative presets (one per
+dominant pendulum sector: Fount, Ethos, Will, Cycle).  This meant that
+regardless of which beads were placed or how the pendulum swung, the
+narrative context was limited to 4 distinct story outcomes.
+
+The update uses the combination of (dominant_sector, secondary_bead) to
+select from a pool of 4 Odu per sector, yielding all 16 Odu across the
+full system.
+
+
+FILES IN THIS FOLDER
+--------------------
+
+1. stochastic_turn_bridge.py
+   - Replaces: pendulum_hardware_dev/STOCHASTIC DREAMS PENDULUM/lubi-board/stochastic_turn_bridge.py
+   - This is the live hardware bridge that runs on the Raspberry Pi / hardware controller.
+
+2. stochastic_udp_test.py
+   - Replaces: input_test_sim/stochastic_udp_test.py
+   - This is the test harness that simulates hardware input from the Windows development machine.
+
+3. update_notes.txt (this file)
+
+
+WHAT CHANGED
+------------
+
+### stochastic_turn_bridge.py
+
+REMOVED:
+  - The old STORY_PRESETS dictionary (4 entries keyed by sector name: "Fount",
+    "Ethos", "Will", "Cycle").
+  - The line: preset = STORY_PRESETS.get(traversal["dominant_sector"], STORY_PRESETS["Will"])
+
+ADDED:
+  - _ODU_ONTOLOGY: Complete list of all 16 primary Odu, each carrying every
+    field needed by _build_packet (cue texts, world effects, predicament
+    families, tapestry regions, etc.).  This is identical to the ontology
+    already used in the test harness.
+
+  - _ODU_BY_NAME: Fast lookup dictionary keyed by odu_name for O(1) access.
+
+  - _SECTOR_ODU_POOL: Maps each of the 4 pendulum sectors to a pool of 4
+    thematically-aligned Odu:
+
+      Fount → OGBE MEJI, OKANRAN MEJI, OGUNDA MEJI, IWORI MEJI
+      Ethos → OWONRIN MEJI, OBARA MEJI, OSE MEJI, ODI MEJI
+      Will  → OSA MEJI, IKA MEJI, OTURA MEJI, IROSUN MEJI
+      Cycle → OYEKU MEJI, OTURUPON MEJI, IRETE MEJI, OFUN MEJI
+
+    Assignment rationale:
+      - Primary assignment: Odu whose tapestry_region_primary corresponds
+        directly to the sector (e.g., "Foundries of Fount" → Fount sector).
+      - Secondary assignment: Odu whose tapestry_region_secondary or thematic
+        domain aligns with the sector.
+      - Every Odu appears in exactly one pool (no duplicates, no omissions).
+
+  - _BEAD_SUB_INDEX: Maps each bead name to an index (0-3) used to select
+    within a sector pool.  "Seed" maps to index 0 (same as "Fount") since
+    Seed is never a sector anchor in the physical system.
+
+  - _select_odu(dominant_sector, secondary_bead): The new selection function.
+    Given the pendulum's dominant sector and the board's secondary bead, it
+    returns the appropriate Odu dictionary.
+
+CHANGED in _build_packet():
+  - Old: preset = STORY_PRESETS.get(traversal["dominant_sector"], STORY_PRESETS["Will"])
+  - New: preset = _select_odu(traversal["dominant_sector"], board["secondary_bead"])
+  - All downstream field access (preset["odu_name"], preset["diviner_operation_cue"],
+    etc.) works identically because the Odu dictionaries carry the same keys
+    that the old STORY_PRESETS entries carried, plus additional fields.
+
+UNCHANGED:
+  - All TurnBridge class methods (start_turn, tick, close, _publish, etc.)
+  - All board helpers (_build_board_beads, _compute_perturbation_factor, etc.)
+  - All traversal/pendulum helpers (_build_traversal, _build_pendulum_metrics, etc.)
+  - Packet structure and field names (fully backward-compatible)
+  - OSC communication, UDP publishing, hub health checks
+  - Constructor signature and all configuration parameters
+
+
+### stochastic_udp_test.py
+
+REMOVED:
+  - The line: odu = _ODU_ONTOLOGY[index % len(_ODU_ONTOLOGY)]
+    (which selected Odu by simple modular index, disconnected from
+    board/traversal state)
+
+ADDED:
+  - _SECTOR_ODU_POOL, _BEAD_SUB_INDEX, _select_odu(): Identical copies of
+    the selection logic from stochastic_turn_bridge.py, ensuring the test
+    harness produces the same Odu selection as the real hardware for any
+    given (dominant_sector, secondary_bead) combination.
+
+CHANGED in build_sample():
+  - Odu selection now uses the traversal's dominant_sector and the board
+    preset's secondary bead:
+      dominant_sector = uwp_traversal["dominant_sector"]
+      odu = _select_odu(dominant_sector, secondary)
+  - The pendulum_summary in the shared turn_packet now correctly references
+    dominant_sector (from traversal) instead of always using primary (from
+    board preset).
+
+CHANGED in _generate_traversal():
+  - dominant_sector is now computed from actual dwell fractions
+    (dominant = max(dwell, key=dwell.get)) rather than always being set
+    to the primary bead.  This matters when primary is "Seed" (which is
+    not a sector anchor in the physical system), since the pendulum can
+    never physically dwell in "Seed" — dwell is distributed across the
+    4 real sectors.
+
+UNCHANGED:
+  - All configuration constants (DELAY_SECONDS, TARGET_MODE, ports, etc.)
+  - RANDOMIZE_BEADS / RANDOMIZE_ORDER logic
+  - All board presets, pendulum presets
+  - Packet structure and envelope wrapping
+  - main() function flow, send_payload, hub health checks
+
+
+WHY THIS WAS DONE
+-----------------
+The physical Lubi Board system has 5 beads and a pendulum that swings across
+4 sector regions.  With the old 4-preset system, no matter how the visitor
+arranged the beads, the narrative outcome was determined solely by which
+sector the pendulum dwelled in longest.  The secondary bead — which the
+visitor specifically places — had no effect on narrative selection.
+
+This update makes the secondary bead meaningfully influence the story:
+  - A visitor placing (Fount primary, Will secondary) gets OGUNDA MEJI
+    (Incision & Clearing / Justice)
+  - The same dominant sector with (Fount primary, Ethos secondary) gets
+    OKANRAN MEJI (Signal & Threshold / Technology)
+
+This gives the physical installation 16 distinct narrative outcomes from
+the same hardware, matching the full Odu ontology designed for the project.
+
+
+HOW TO INCORPORATE
+------------------
+
+1. HARDWARE BRIDGE (Raspberry Pi / hardware controller):
+   - Back up the current file:
+       cp lubi-board/stochastic_turn_bridge.py lubi-board/stochastic_turn_bridge.py.bak
+   - Replace with the new version:
+       cp updated_files_to_use/stochastic_turn_bridge.py lubi-board/stochastic_turn_bridge.py
+   - No other files on the hardware need to change.
+   - The TurnBridge class constructor signature is unchanged, so no
+     calling code needs modification.
+   - Restart the bridge process.
+
+2. TEST HARNESS (Windows development machine):
+   - Back up the current file:
+       copy input_test_sim\stochastic_udp_test.py input_test_sim\stochastic_udp_test.py.bak
+   - Replace with the new version:
+       copy updated_files_to_use\stochastic_udp_test.py input_test_sim\stochastic_udp_test.py
+   - No other files need to change.
+   - Run: python input_test_sim/stochastic_udp_test.py
+
+3. DOWNSTREAM CONSUMERS (Godot / Hub / ComfyUI):
+   - No changes needed.  The packet structure is fully backward-compatible.
+   - The only difference downstream consumers will see is greater variety
+     in the odu, matrix_resolution, and turn_packet fields across different
+     turns — which is the entire point.
+
+4. VALIDATION:
+   - Run the test harness and verify that different turns produce different
+     Odu names in the console output (check the "@ <province>" suffix).
+   - Confirm that the Godot story stage receives the turns and generates
+     varied narrative responses.
+   - Verify that vis_story image renders show color diversity (the Odu
+     selection feeds into panel data which determines render themes).
+
+
+RISK ASSESSMENT
+---------------
+- LOW RISK: No packet structure changes, no new dependencies, no API changes.
+- The _SECTOR_ODU_POOL assignment is a one-time design decision.  If certain
+  Odu feel misassigned to their sector after testing, the pool lists can be
+  rearranged without touching any other code.
+- The _BEAD_SUB_INDEX mapping (which bead → which pool slot) can also be
+  adjusted if certain (sector, bead) combinations produce narratively
+  awkward pairings.
+- Fallback behavior is preserved: if an unexpected sector or bead name
+  appears, the code falls back to the "Will" sector pool and index 0,
+  exactly matching the old STORY_PRESETS fallback.
+================================================================================
