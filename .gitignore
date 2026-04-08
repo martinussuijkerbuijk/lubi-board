@@ -2,3 +2,9 @@
 *.jpg
 *.jpeg
 *.csv   
+
+dataset_raw/
+coin_project_v1/
+
+runs/detect/coin_model_v1/
+runs/detect/coin_model_v12/

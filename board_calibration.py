@@ -8,7 +8,7 @@ import os
 # 640x640 is great for YOLOv8 (no resizing needed later)
 WARPED_SIZE = (640, 640) 
 CALIBRATION_FILE = "calibration_matrix.json"
-
+CAMERA_NR = 1
 # Global variables for mouse callback
 points = []
 
@@ -27,7 +27,7 @@ def save_calibration(matrix):
 def main():
     global points
     
-    cap = cv2.VideoCapture(0)
+    cap = cv2.VideoCapture(CAMERA_NR)
     # Set to high resolution for accurate clicking
     cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1920)
     cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 1080)

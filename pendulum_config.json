@@ -1,0 +1,31 @@
+{
+  "camera_index": 0,
+  "frame_width": 1280,
+  "frame_height": 720,
+  "target_fps": 60,
+  "hsv_lower": [
+    28,
+    0,
+    213
+  ],
+  "hsv_upper": [
+    48,
+    44,
+    255
+  ],
+  "min_blob_area": 100,
+  "center_x_px": 452,
+  "center_y_px": 112,
+  "dead_band_px": 20,
+  "hysteresis_px": 30,
+  "serial_port": "COM4",
+  "serial_baud": 115200,
+  "pull_strength": 255,
+  "push_strength": 255,
+  "latency_s": 0.08,
+  "history_len": 12,
+  "osc_listen_ip": "0.0.0.0",
+  "osc_listen_port": 9000,
+  "osc_feedback_ip": "127.0.0.1",
+  "osc_feedback_port": 9001
+}
