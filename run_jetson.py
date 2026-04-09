@@ -24,9 +24,12 @@ BLEED_PADDING = 60
 CALIBRATION_FILE = "calibration_matrix.json"
 MODEL_PATH = "runs/detect/coin_model_v13/weights/best.engine"
 
-# GPIO Button Config (BOARD pin numbering)
-# Pin 7 = GPIO9. Change to match your wiring.
-BUTTON_PIN = 7
+# GPIO Pin Config (BOARD pin numbering)
+BUTTON_PIN = 7    # Active LOW, internal pull-up. Change to match your wiring.
+LED_PIN    = 15   # PWM output to L298N IN1.    Change to match your wiring.
+
+# RGB strip type: True = Common Anode (12V+), False = Common Cathode (GND)
+LED_IS_COMMON_ANODE = True
 
 # OSC Config
 OSC_TARGET_IP = "127.0.0.1"
@@ -40,6 +43,82 @@ INFERENCE_EVERY_N_FRAMES = 3
 REQUIRED_CLASSES = ["gold", "spice", "deer", "man", "tree"]
 
 
+# ---------------------------------------------------------------------------
+# LED control thread — mirrors the Arduino sketch behaviour:
+#   IDLE    → breathing glow
+#   ACTIVE  → flicker 5x then hold on
+#   RESET   → back to breathing (happens when button_triggered flips False)
+#
+# Uses direct GPIO.output() + manual timing instead of GPIO.PWM so it works
+# reliably on any GPIO pin (hardware-PWM pins via sysfs + ChangeDutyCycle from
+# a background thread is unreliable on Jetson and causes cleanup errors).
+# ---------------------------------------------------------------------------
+def led_thread_func(state, led_flickered, stop_event):
+    # Logic-level shortcuts so the rest of the code reads "ON / OFF"
+    LED_ON  = GPIO.LOW  if LED_IS_COMMON_ANODE else GPIO.HIGH
+    LED_OFF = GPIO.HIGH if LED_IS_COMMON_ANODE else GPIO.LOW
+
+    PWM_PERIOD = 0.020   # 20 ms per PWM cycle = 50 Hz (matches Arduino glowSpeed)
+
+    brightness  = 0      # 0 = off, 255 = fully on
+    fade_amount = 3
+
+    GPIO.output(LED_PIN, LED_OFF)
+
+    while not stop_event.is_set():
+        triggered = state["button_triggered"]
+
+        if not triggered:
+            # ---- IDLE: breathing glow ----
+            if led_flickered["done"]:
+                # Returning from active state → reset
+                led_flickered["done"] = False
+                brightness  = 0
+                fade_amount = abs(fade_amount)
+                GPIO.output(LED_PIN, LED_OFF)
+
+            # Manual PWM: spend (brightness/255) of the period in ON state
+            duty     = brightness / 255.0
+            on_time  = duty * PWM_PERIOD
+            off_time = PWM_PERIOD - on_time
+
+            if on_time > 0.0005:
+                GPIO.output(LED_PIN, LED_ON)
+                time.sleep(on_time)
+
+            GPIO.output(LED_PIN, LED_OFF)
+            if off_time > 0.0005:
+                time.sleep(off_time)
+
+            # Advance brightness (same cadence as Arduino: once per glowSpeed)
+            brightness += fade_amount
+            if brightness <= 0 or brightness >= 255:
+                fade_amount = -fade_amount
+                brightness  = max(0, min(255, brightness))
+
+        else:
+            # ---- ACTIVE ----
+            if not led_flickered["done"]:
+                # Flicker 5 times (60 ms on / 60 ms off)
+                for _ in range(5):
+                    if stop_event.is_set():
+                        return
+                    GPIO.output(LED_PIN, LED_ON)
+                    time.sleep(0.060)
+                    GPIO.output(LED_PIN, LED_OFF)
+                    time.sleep(0.060)
+                # Hold fully on until reset
+                GPIO.output(LED_PIN, LED_ON)
+                led_flickered["done"] = True
+            else:
+                time.sleep(0.050)   # stay on, avoid busy-loop
+
+    GPIO.output(LED_PIN, LED_OFF)   # tidy up on exit
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
 def load_calibration():
     if not os.path.exists(CALIBRATION_FILE):
         logging.error("Error: Calibration file not found. Please copy it from your PC.")
@@ -91,6 +170,9 @@ def get_closest_node(point, nodes):
     return best_node, min_dist
 
 
+# ---------------------------------------------------------------------------
+# Main
+# ---------------------------------------------------------------------------
 def main():
     # --- OSC Setup ---
     osc_client = SimpleUDPClient(OSC_TARGET_IP, OSC_SEND_PORT)
@@ -99,14 +181,19 @@ def main():
         "button_triggered": False,
         "sent_start_signal": False,
         "detection_start_time": None,
-        "button_released": True,   # tracks release so we detect edges, not levels
+        "button_released": True,
     }
+
+    # Shared flag so the LED thread knows whether it has already flickered
+    # for the current button press (avoids repeating the flicker on every loop).
+    led_flickered = {"done": False}
 
     def on_back_received(address, *args):
         logging.info("--- BACK RECEIVED: Resetting State ---")
         state["button_triggered"] = False
         state["sent_start_signal"] = False
         state["detection_start_time"] = None
+        # led_thread resets led_flickered["done"] itself when it sees triggered=False
 
     osc_dispatcher = dispatcher.Dispatcher()
     osc_dispatcher.map("/pendulum/back", on_back_received)
@@ -114,32 +201,45 @@ def main():
     threading.Thread(target=receive_server.serve_forever, daemon=True).start()
     logging.info(f"OSC receiver listening on port {OSC_RECV_PORT}")
 
-    # --- GPIO Button Setup ---
+    # --- GPIO Setup ---
     GPIO.setmode(GPIO.BOARD)
-    GPIO.setup(BUTTON_PIN, GPIO.IN, pull_up_down=GPIO.PUD_UP)  # Active LOW
 
-    def on_button_press(channel):
-        """Called on falling edge (button pressed, active LOW)."""
-        if state["button_released"]:
-            if not state["button_triggered"]:
+    # Button
+    GPIO.setup(BUTTON_PIN, GPIO.IN, pull_up_down=GPIO.PUD_UP)
+
+    def on_gpio_event(channel):
+        if GPIO.input(channel) == GPIO.LOW:
+            # Falling edge → button pressed
+            if state["button_released"] and not state["button_triggered"]:
                 logging.info("Button Pressed (GPIO falling edge)")
                 state["button_triggered"] = True
             state["button_released"] = False
+        else:
+            # Rising edge → button released
+            state["button_released"] = True
 
-    def on_button_release(channel):
-        """Called on rising edge (button released)."""
-        state["button_released"] = True
-
-    GPIO.add_event_detect(BUTTON_PIN, GPIO.BOTH, callback=lambda ch: (
-        on_button_press(ch) if GPIO.input(ch) == GPIO.LOW else on_button_release(ch)
-    ), bouncetime=50)
-
+    GPIO.add_event_detect(BUTTON_PIN, GPIO.BOTH, callback=on_gpio_event, bouncetime=50)
     logging.info(f"GPIO button on BOARD pin {BUTTON_PIN} (active LOW, internal pull-up)")
+
+    # LED (direct GPIO output — thread does manual PWM, no GPIO.PWM needed)
+    GPIO.setup(LED_PIN, GPIO.OUT,
+               initial=GPIO.HIGH if LED_IS_COMMON_ANODE else GPIO.LOW)  # start off
+    logging.info(f"GPIO LED on BOARD pin {LED_PIN} (common-anode={LED_IS_COMMON_ANODE})")
+
+    # Start LED background thread
+    led_stop = threading.Event()
+    t_led = threading.Thread(
+        target=led_thread_func,
+        args=(state, led_flickered, led_stop),
+        daemon=True,
+    )
+    t_led.start()
 
     # --- Calibration & Grid ---
     logging.info("Loading calibration...")
     matrix, warped_size = load_calibration()
     if matrix is None:
+        led_stop.set()
         GPIO.cleanup()
         return
 
@@ -150,6 +250,7 @@ def main():
     if not os.path.exists(MODEL_PATH):
         logging.error(f"Model not found: {MODEL_PATH}")
         logging.info("Run: yolo export model=best.pt format=engine device=0")
+        led_stop.set()
         GPIO.cleanup()
         return
 
@@ -166,9 +267,9 @@ def main():
 
     # Frame-skip state
     frame_count = 0
-    cached_board_state = {}     # {(row,col): class_name}
-    cached_detections = []      # [(class_name, cx, cy)]
-    cached_boxes = []           # [(x1,y1,x2,y2,class_name,node_key_or_None)]
+    cached_board_state = {}
+    cached_detections = []
+    cached_boxes = []
 
     prev_time = time.time()
 
@@ -182,9 +283,7 @@ def main():
             display_frame = warped_frame.copy()
 
             frame_count += 1
-            run_inference = (frame_count % INFERENCE_EVERY_N_FRAMES == 0)
-
-            if run_inference:
+            if frame_count % INFERENCE_EVERY_N_FRAMES == 0:
                 results = model(warped_frame, verbose=False, conf=0.5, device=0)
 
                 cached_board_state = {}
@@ -199,7 +298,6 @@ def main():
 
                         center_x = int((x1 + x2) / 2)
                         center_y = int((y1 + y2) / 2)
-
                         cached_detections.append((class_name, center_x, center_y))
 
                         node_key, dist = get_closest_node((center_x, center_y), grid_nodes)
@@ -213,7 +311,6 @@ def main():
             for (x1, y1, x2, y2, class_name, node_key) in cached_boxes:
                 center_x = int((x1 + x2) / 2)
                 center_y = int((y1 + y2) / 2)
-
                 if node_key is not None:
                     grid_x, grid_y = grid_nodes[node_key]
                     row, col = node_key
@@ -287,7 +384,7 @@ def main():
                 elif not state["sent_start_signal"]:
                     print(f"Waiting... Found: {len(unique_found)}/5 {list(unique_found.keys())} | Time: {elapsed:.1f}s   ", end='\r')
 
-            # --- Button / Status Display ---
+            # --- Status Overlay ---
             if not state["button_triggered"]:
                 cv2.putText(display_frame, "WAITING FOR BUTTON...", (20, 50),
                             cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 255), 2)
@@ -312,8 +409,10 @@ def main():
     finally:
         cap.release()
         cv2.destroyAllWindows()
+        led_stop.set()
+        t_led.join(timeout=1.0)   # wait for thread to turn LED off cleanly
         GPIO.cleanup()
-        logging.info("GPIO cleaned up.")
+        logging.info("Shutdown complete.")
 
 
 if __name__ == "__main__":
