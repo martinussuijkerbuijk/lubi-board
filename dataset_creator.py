@@ -7,7 +7,7 @@ import time
 # --- CONFIGURATION ---
 CAPTURE_INTERVAL = 6.0  # Seconds between shots
 DATASET_FOLDER = "./dataset_raw"
-CALIBRATION_FILE = "../calibration_matrix.json"
+CALIBRATION_FILE = "./calibration_matrix.json"
 BLEED_PADDING = 60      # Pixels of extra space around the grid (Prevents cutoff at corners)
 
 def load_calibration():
@@ -68,7 +68,7 @@ def main():
     cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1920)
     cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 1080)
 
-    cap.set(cv2.CAP_PROP_AUTOFOCUS, 0)
+    cap.set(cv2.CAP_PROP_AUTOFOCUS, 1)
     cap.set(cv2.CAP_PROP_FOCUS, 255) # Try changing this to 255 if 0 is blurry
     cap.set(cv2.CAP_PROP_EXPOSURE, 0)
     # Optional: Disable Auto-Exposure/White Balance for a truly "static" image

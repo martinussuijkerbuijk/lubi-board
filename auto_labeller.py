@@ -11,11 +11,11 @@ CONFIDENCE_THRESHOLD = 0.02  # Low threshold to catch everything (we filter manu
 # DEFINE YOUR CLASSES
 # Use -1 for the Class ID to indicate an "Empty" or "Ignore" category.
 KEY_MAPPING = {
-    'g': (0, "gold"),
-    's': (1, "spice"),
-    'd': (2, "deer"),
-    'm': (3, "man"),
-    't': (4, "tree"),
+    'w': (0, "will"),
+    'f': (1, "fount"),
+    'e': (2, "ethos"),
+    'c': (3, "cycle"),
+    's': (4, "seed"),
     'x': (-1, "empty/ignore"), # Press 'x' to explicitly ignore this detection
     # Add others as needed...
 }
