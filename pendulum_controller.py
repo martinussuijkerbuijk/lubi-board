@@ -104,6 +104,10 @@ class Config:
     osc_feedback_ip: str = "127.0.0.1"
     osc_feedback_port: int = 9001
 
+    # --- Coin result endpoint ---
+    result_ip: str = "192.168.1.102"
+    result_port: int = 9002
+
     def save(self, filepath: Path = CONFIG_FILE) -> None:
         """Save configuration to JSON file."""
         # Convert dataclass to dict
@@ -129,6 +133,8 @@ class Config:
             "osc_listen_port": self.osc_listen_port,
             "osc_feedback_ip": self.osc_feedback_ip,
             "osc_feedback_port": self.osc_feedback_port,
+            "result_ip": self.result_ip,
+            "result_port": self.result_port,
         }
         
         try:
@@ -171,7 +177,9 @@ class Config:
             cfg.osc_listen_port = data.get("osc_listen_port", cfg.osc_listen_port)
             cfg.osc_feedback_ip = data.get("osc_feedback_ip", cfg.osc_feedback_ip)
             cfg.osc_feedback_port = data.get("osc_feedback_port", cfg.osc_feedback_port)
-            
+            cfg.result_ip = data.get("result_ip", cfg.result_ip)
+            cfg.result_port = data.get("result_port", cfg.result_port)
+
             log.info("Configuration loaded from %s", filepath)
             return cfg
             
@@ -416,6 +424,13 @@ class PendulumController:
         # OSC feedback client
         self.osc_feedback = SimpleUDPClient(cfg.osc_feedback_ip, cfg.osc_feedback_port)
 
+        # Coin tracking state
+        self._current_pos: Optional[Tuple[int, int]] = None
+        self._coin_data: Optional[dict] = None
+        self._tracking_positions: list = []
+        # Result sender
+        self._result_client = SimpleUDPClient(cfg.result_ip, cfg.result_port)
+
     # ------------------------------------------------------------------
     # OSC-facing controls
     # ------------------------------------------------------------------
@@ -496,6 +511,58 @@ class PendulumController:
         self._startup_phase = None
         self._running = True
 
+    def coin_start(self, names: str, x: float, y: float) -> None:
+        """
+        Receive coin data, start the pendulum cycle, track camera x/y for 10 s
+        (one sample per second), then pull to center and send results to the
+        configured result endpoint.
+        """
+        log.info("Coin session starting: names=%s coin_x=%.1f coin_y=%.1f", names, x, y)
+        self._coin_data = {"names": names, "x": x, "y": y}
+        self._tracking_positions = []
+        self.start()
+        threading.Thread(target=self._tracking_cycle, daemon=True).start()
+
+    def _tracking_cycle(self) -> None:
+        """Background thread: record one camera x/y per second for 10 s."""
+        for i in range(10):
+            time.sleep(1.0)
+            pos = self._current_pos
+            entry = {"x": pos[0], "y": pos[1]} if pos else {"x": None, "y": None}
+            self._tracking_positions.append(entry)
+            log.info("Tracking snapshot %d/10: %s", i + 1, entry)
+
+        log.info("10 s elapsed — pulling pendulum to center")
+        self.brake()
+
+        # Wait for the brake to complete (pendulum reaches center)
+        deadline = time.monotonic() + 15.0
+        while self._brake_mode and time.monotonic() < deadline:
+            time.sleep(0.1)
+
+        log.info("Pendulum centered. Sending results to %s:%d",
+                 self.cfg.result_ip, self.cfg.result_port)
+        self._send_results()
+
+    def _send_results(self) -> None:
+        """Package original coin data + 10 tracked positions, send via OSC."""
+        if not self._coin_data:
+            log.warning("_send_results called but no coin data stored")
+            return
+
+        payload = {
+            "coin": self._coin_data,
+            "track": self._tracking_positions,
+        }
+        payload_json = json.dumps(payload)
+
+        try:
+            self._result_client.send_message("/pendulum/result", [payload_json])
+            log.info("Results sent: %s", payload_json)
+        except Exception as e:
+            log.error("Failed to send results to %s:%d — %s",
+                      self.cfg.result_ip, self.cfg.result_port, e)
+
     def show_gui(self) -> None:
         """Show the video feed window."""
         self._gui_visible = True
@@ -545,6 +612,7 @@ class PendulumController:
         """
         Process one frame. Returns the current magnet state label.
         """
+        self._current_pos = pos  # always store latest camera position for tracking thread
         if pos is None:
             return self._state
 
@@ -721,6 +789,10 @@ class PendulumController:
 def build_osc_server(cfg: Config, controller: PendulumController):
     """
     OSC addresses:
+        /pendulum/coin_start <names> <x> <y>
+                                      – receive coin data, run pendulum for 10 s,
+                                        track camera x/y every second, brake to
+                                        center, then send results to result endpoint
         /pendulum/start               – start perpetual motion (with startup sequence)
         /pendulum/continue            – continue perpetual motion (no startup sequence)
         /pendulum/stop                – stop
@@ -736,6 +808,13 @@ def build_osc_server(cfg: Config, controller: PendulumController):
         /pendulum/strength <pull> <push> – set PWM strengths 0-255
     """
     d = osc_dispatcher.Dispatcher()
+
+    def _coin_start(addr, *args):
+        names = str(args[0]) if args else ""
+        x = float(args[1]) if len(args) > 1 else 0.0
+        y = float(args[2]) if len(args) > 2 else 0.0
+        controller.coin_start(names, x, y)
+    d.map("/pendulum/coin_start", _coin_start)
 
     d.map("/pendulum/start",    lambda addr, *a: controller.start())
     d.map("/pendulum/continue", lambda addr, *a: controller.continue_motion())
