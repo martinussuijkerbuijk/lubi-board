@@ -513,14 +513,21 @@ class PendulumController:
         self._startup_phase = None
         self._running = True
 
-    def coin_start(self, names: str, x: float, y: float) -> None:
+    def coin_start(self, coin_args: list) -> None:
         """
-        Receive coin data, start the pendulum cycle, track camera x/y for 10 s
-        (one sample per second), then pull to center and send results to the
-        configured result endpoint.
+        Receive coin data as a flat list [name, x, y, name, x, y, ...],
+        start the pendulum cycle, track camera x/y for 10 s (one sample per
+        second), then pull to center and send results to the result endpoint.
         """
-        log.info("Coin session starting: names=%s coin_x=%.1f coin_y=%.1f", names, x, y)
-        self._coin_data = {"names": names, "x": x, "y": y}
+        coins = []
+        for i in range(0, len(coin_args) - 2, 3):
+            coins.append({
+                "name": str(coin_args[i]),
+                "x": float(coin_args[i + 1]),
+                "y": float(coin_args[i + 2]),
+            })
+        log.info("Coin session starting with %d coins: %s", len(coins), coins)
+        self._coin_data = coins
         self._tracking_positions = []
         self.start()
         threading.Thread(target=self._tracking_cycle, daemon=True).start()
@@ -553,7 +560,7 @@ class PendulumController:
             return
 
         payload = {
-            "coin": self._coin_data,
+            "coins": self._coin_data,
             "track": self._tracking_positions,
         }
         payload_json = json.dumps(payload)
@@ -814,15 +821,16 @@ def build_osc_server(cfg: Config, controller: PendulumController):
 
     def _coin_start(addr, *args):
         log.info("OSC RECV  ← %s  args=%s", addr, list(args))
-        names = str(args[0]) if args else ""
-        x = float(args[1]) if len(args) > 1 else 0.0
-        y = float(args[2]) if len(args) > 2 else 0.0
-        controller.coin_start(names, x, y)
+        controller.coin_start(list(args))
     d.map("/pendulum/coin_start", _coin_start)
 
-    def _start(addr, *a):
-        log.info("OSC RECV  ← %s", addr)
-        controller.start()
+    def _start(addr, *args):
+        log.info("OSC RECV  ← %s  args=%s", addr, list(args))
+        if args:
+            # Coin data attached: [name, x, y, name, x, y, ...]
+            controller.coin_start(list(args))
+        else:
+            controller.start()
     d.map("/pendulum/start", _start)
 
     def _continue(addr, *a):
