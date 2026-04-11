@@ -32,7 +32,7 @@ LED_PIN    = 15   # PWM output to L298N IN1.    Change to match your wiring.
 LED_IS_COMMON_ANODE = True
 
 # OSC Config
-OSC_TARGET_IP = "192.168.1.103" #Raspberry Pi
+OSC_TARGET_IP = "192.168.1.103" #Raspberry Piq
 OSC_SEND_PORT = 9000
 OSC_RECV_PORT = 9001
 

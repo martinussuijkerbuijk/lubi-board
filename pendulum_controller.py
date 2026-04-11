@@ -101,7 +101,7 @@ class Config:
     # --- OSC ---
     osc_listen_ip: str = "0.0.0.0"
     osc_listen_port: int = 9000
-    osc_feedback_ip: str = "127.0.0.1"
+    osc_feedback_ip: str = "192.168.1.101"
     osc_feedback_port: int = 9001
 
     # --- Coin result endpoint ---
@@ -449,6 +449,8 @@ class PendulumController:
         # Send Acknowledgement back to run.py
         try:
             self.osc_feedback.send_message("/pendulum/back", [])
+            log.info("OSC SENT  → %s:%d  /pendulum/back  []",
+                     self.cfg.osc_feedback_ip, self.cfg.osc_feedback_port)
         except Exception as e:
             log.warning("Failed to send ACK: %s", e)
 
@@ -558,9 +560,10 @@ class PendulumController:
 
         try:
             self._result_client.send_message("/pendulum/result", [payload_json])
-            log.info("Results sent: %s", payload_json)
+            log.info("OSC SENT  → %s:%d  /pendulum/result  %s",
+                     self.cfg.result_ip, self.cfg.result_port, payload_json)
         except Exception as e:
-            log.error("Failed to send results to %s:%d — %s",
+            log.error("OSC SEND FAILED → %s:%d  /pendulum/result — %s",
                       self.cfg.result_ip, self.cfg.result_port, e)
 
     def show_gui(self) -> None:
@@ -810,45 +813,80 @@ def build_osc_server(cfg: Config, controller: PendulumController):
     d = osc_dispatcher.Dispatcher()
 
     def _coin_start(addr, *args):
+        log.info("OSC RECV  ← %s  args=%s", addr, list(args))
         names = str(args[0]) if args else ""
         x = float(args[1]) if len(args) > 1 else 0.0
         y = float(args[2]) if len(args) > 2 else 0.0
         controller.coin_start(names, x, y)
     d.map("/pendulum/coin_start", _coin_start)
 
-    d.map("/pendulum/start",    lambda addr, *a: controller.start())
-    d.map("/pendulum/continue", lambda addr, *a: controller.continue_motion())
-    d.map("/pendulum/stop",     lambda addr, *a: controller.stop())
-    d.map("/pendulum/brake",    lambda addr, *a: controller.brake())
-    
-    d.map("/pendulum/gui/show",   lambda addr, *a: controller.show_gui())
-    d.map("/pendulum/gui/hide",   lambda addr, *a: controller.hide_gui())
-    d.map("/pendulum/gui/toggle", lambda addr, *a: controller.toggle_gui())
-    
+    def _start(addr, *a):
+        log.info("OSC RECV  ← %s", addr)
+        controller.start()
+    d.map("/pendulum/start", _start)
+
+    def _continue(addr, *a):
+        log.info("OSC RECV  ← %s", addr)
+        controller.continue_motion()
+    d.map("/pendulum/continue", _continue)
+
+    def _stop(addr, *a):
+        log.info("OSC RECV  ← %s", addr)
+        controller.stop()
+    d.map("/pendulum/stop", _stop)
+
+    def _brake(addr, *a):
+        log.info("OSC RECV  ← %s", addr)
+        controller.brake()
+    d.map("/pendulum/brake", _brake)
+
+    def _gui_show(addr, *a):
+        log.info("OSC RECV  ← %s", addr)
+        controller.show_gui()
+    d.map("/pendulum/gui/show", _gui_show)
+
+    def _gui_hide(addr, *a):
+        log.info("OSC RECV  ← %s", addr)
+        controller.hide_gui()
+    d.map("/pendulum/gui/hide", _gui_hide)
+
+    def _gui_toggle(addr, *a):
+        log.info("OSC RECV  ← %s", addr)
+        controller.toggle_gui()
+    d.map("/pendulum/gui/toggle", _gui_toggle)
+
     def _push(addr, *args):
         strength = int(args[0]) if args else None
+        log.info("OSC RECV  ← %s  strength=%s", addr, strength)
         controller.set_force("PUSH", strength)
     d.map("/pendulum/push", _push)
-    
+
     def _pull(addr, *args):
         strength = int(args[0]) if args else None
+        log.info("OSC RECV  ← %s  strength=%s", addr, strength)
         controller.set_force("PULL", strength)
     d.map("/pendulum/pull", _pull)
-    
-    d.map("/pendulum/off", lambda addr, *a: controller.set_force("OFF"))
+
+    def _off(addr, *a):
+        log.info("OSC RECV  ← %s", addr)
+        controller.set_force("OFF")
+    d.map("/pendulum/off", _off)
 
     def _disrupt(addr, *args):
         pol = int(args[0]) if args else 1
         dur = float(args[1]) if len(args) > 1 else 0.3
+        log.info("OSC RECV  ← %s  polarity=%+d duration=%.2fs", addr, pol, dur)
         controller.disrupt(pol, dur)
     d.map("/pendulum/disrupt", _disrupt)
 
     def _latency(addr, *args):
+        log.info("OSC RECV  ← %s  args=%s", addr, list(args))
         if args:
             controller.set_latency(float(args[0]))
     d.map("/pendulum/latency", _latency)
 
     def _strength(addr, *args):
+        log.info("OSC RECV  ← %s  args=%s", addr, list(args))
         if len(args) >= 2:
             controller.set_strength(int(args[0]), int(args[1]))
     d.map("/pendulum/strength", _strength)
