@@ -37,7 +37,7 @@ def get_coin_proposals(image):
     # Run inference
     # classes=None : Detect everything (don't filter for specific classes yet)
     # agnostic_nms=True : Don't let multiple class boxes overlap on one object
-    results = model(image, conf=CONFIDENCE_THRESHOLD, iou=0.4, agnostic_nms=True, verbose=False)
+    results = model(image, conf=CONFIDENCE_THRESHOLD, iou=0.4, agnostic_nms=True, verbose=False, classes=[74, 25])
     
     boxes = []
     
@@ -46,13 +46,16 @@ def get_coin_proposals(image):
         for box in result.boxes:
             # Get coordinates (x1, y1, x2, y2)
             x1, y1, x2, y2 = box.xyxy[0].cpu().numpy().astype(int)
+            print(f"Class: {int(box.cls[0])} Conf: {float(box.conf[0]):.2f}")
             
             w = x2 - x1
             h = y2 - y1
             
             # Basic size filtering to ignore tiny noise or huge errors
             # Adjust these if your coins are smaller/larger in the image
-            if w < 10 or h < 10: continue
+            if w < 30 or h < 30: continue
+            if w > 200 or h > 200: continue
+            if min(w, h) / max(w, h) < 0.5: continue
             if w > image.shape[1] / 2: continue # Ignore massive boxes covering half screen
             
             boxes.append((x1, y1, w, h))

@@ -1,0 +1,9 @@
+path: /home/martinus/Projects/lubi-board/coin_project_v2
+train: train/images
+val: val/images
+names:
+  0: will
+  1: fount
+  2: ethos
+  3: cycle
+  4: seed

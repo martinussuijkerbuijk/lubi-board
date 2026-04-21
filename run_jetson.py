@@ -22,7 +22,7 @@ BLEED_PADDING = 60
 
 # Files
 CALIBRATION_FILE = "calibration_matrix.json"
-MODEL_PATH = "runs/detect/coin_model_v13/weights/best.engine"
+MODEL_PATH = "runs/detect/coin_model_v3/weights/best.pt"
 
 # GPIO Pin Config (BOARD pin numbering)
 BUTTON_PIN = 7    # Active LOW, internal pull-up. Change to match your wiring.
@@ -259,8 +259,8 @@ def main():
 
     # --- Camera ---
     cap = cv2.VideoCapture(0)
-    cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
-    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+    cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1920)
+    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 1080)
 
     logging.info("--- INFERENCE RUNNING ---")
     logging.info("Press 'q' to quit.")
@@ -284,7 +284,7 @@ def main():
 
             frame_count += 1
             if frame_count % INFERENCE_EVERY_N_FRAMES == 0:
-                results = model(warped_frame, verbose=False, conf=0.5, device=0)
+                results = model(warped_frame, verbose=False, conf=0.005, device=0)
 
                 cached_board_state = {}
                 cached_detections = []

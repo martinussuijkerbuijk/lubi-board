@@ -104,7 +104,7 @@ def get_closest_node(point, nodes):
 def main():
     # OSC Configuration
     osc_client = SimpleUDPClient("127.0.0.1", 9000)
-    required_classes = ["gold", "spice", "deer", "man", "tree"]
+    required_classes = ["will", "fount", "ethos", "cycle", "seed"]
     
     # System State (Thread-safe container)
     state = {

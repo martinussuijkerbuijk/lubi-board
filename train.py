@@ -6,17 +6,17 @@ from ultralytics import YOLO
 
 # --- CONFIGURATION ---
 RAW_DATA_DIR = "./dataset_raw"
-PROJECT_DIR = "coin_project_v1"  # Where formatted data and models will be saved
+PROJECT_DIR = "coin_project_v3"  # Where formatted data and models will be saved
 TRAIN_RATIO = 0.8                # 80% training, 20% validation
 
 # IMPORTANT: This must match the KEY_MAPPING from your auto_labeler.py
 # The order (indices 0, 1, 2...) is critical.
 CLASS_NAMES = {
-    0: "gold",
-    1: "spice",
-    2: "deer",
-    3: "man",
-    4: "tree",
+    0: "will",
+    1: "fount",
+    2: "ethos",
+    3: "cycle",
+    4: "seed",
     # Add the rest of your classes here to match your dataset...
 }
 
@@ -101,14 +101,14 @@ def train():
     # batch=16: Good for most GPUs. Reduce to 8 if you run out of memory.
     model.train(
         data=yaml_path,
-        epochs=100,
+        epochs=300,
         imgsz=640,
-        batch=16,
-        name='coin_model_v1'
+        batch=8,
+        name='coin_model_v3'
     )
     
     print("Training Complete!")
-    print(f"Best model saved to: runs/detect/coin_model_v1/weights/best.pt")
+    print(f"Best model saved to: runs/detect/coin_model_v3/weights/best.pt")
 
 if __name__ == "__main__":
     train()
